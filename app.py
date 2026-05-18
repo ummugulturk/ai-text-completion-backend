@@ -41,9 +41,13 @@ def call_huggingface_fill_mask(text):
         timeout=60
     )
 
-    data = response.json()
+    raw = response.text
 
-    # Model ilk çağrıda yükleniyor olabilir
+    try:
+        data = response.json()
+    except Exception:
+        raise Exception(f"HF response is not JSON. Status={response.status_code}, Body={raw[:300]}")
+
     if isinstance(data, dict) and "estimated_time" in data:
         time.sleep(float(data["estimated_time"]) + 1)
 
@@ -53,12 +57,17 @@ def call_huggingface_fill_mask(text):
             json=payload,
             timeout=60
         )
-        data = response.json()
+
+        raw = response.text
+
+        try:
+            data = response.json()
+        except Exception:
+            raise Exception(f"HF retry response is not JSON. Status={response.status_code}, Body={raw[:300]}")
 
     if isinstance(data, dict) and "error" in data:
         raise Exception(data["error"])
 
-    # HF bazen liste içinde liste döndürür
     if data and isinstance(data[0], list):
         data = data[0]
 
