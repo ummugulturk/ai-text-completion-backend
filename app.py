@@ -11,7 +11,7 @@ app = Flask(__name__)
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 MODEL_NAME = "distilbert-base-uncased"
-HF_API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
+HF_API_URL = f"https://router.huggingface.co/hf-inference/models/{MODEL_NAME}"
 
 HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}"
