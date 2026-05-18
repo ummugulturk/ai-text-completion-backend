@@ -1,11 +1,21 @@
 from flask import Flask, request, jsonify
-from transformers import pipeline
+import requests
 import json
 from datetime import datetime
 import re
+import os
+import time
 
 app = Flask(__name__)
-model = pipeline("fill-mask", model="distilbert-base-uncased")
+
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
+MODEL_NAME = "distilbert-base-uncased"
+HF_API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
+
+HEADERS = {
+    "Authorization": f"Bearer {HF_TOKEN}"
+}
 
 
 def normalize_blanks(text):
@@ -14,6 +24,45 @@ def normalize_blanks(text):
     text = re.sub(r"_{2,}", "[MASK]", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def call_huggingface_fill_mask(text):
+    payload = {
+        "inputs": text,
+        "parameters": {
+            "top_k": 3
+        }
+    }
+
+    response = requests.post(
+        HF_API_URL,
+        headers=HEADERS,
+        json=payload,
+        timeout=60
+    )
+
+    data = response.json()
+
+    # Model ilk çağrıda yükleniyor olabilir
+    if isinstance(data, dict) and "estimated_time" in data:
+        time.sleep(float(data["estimated_time"]) + 1)
+
+        response = requests.post(
+            HF_API_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=60
+        )
+        data = response.json()
+
+    if isinstance(data, dict) and "error" in data:
+        raise Exception(data["error"])
+
+    # HF bazen liste içinde liste döndürür
+    if data and isinstance(data[0], list):
+        data = data[0]
+
+    return data
 
 
 def predict_all_masks(text):
@@ -25,17 +74,14 @@ def predict_all_masks(text):
         temp_text = current_text.replace("[MASK]", "something")
         temp_text = temp_text.replace("something", "[MASK]", 1)
 
-        results = model(temp_text, top_k=3)
-
-        if results and isinstance(results[0], list):
-            results = results[0]
+        results = call_huggingface_fill_mask(temp_text)
 
         predictions = [
             {
                 "token": r["token_str"],
                 "score": float(r["score"])
             }
-            for r in results
+            for r in results[:3]
         ]
 
         results_all.append({
@@ -43,7 +89,7 @@ def predict_all_masks(text):
             "predictions": predictions
         })
 
-        best_word = results[0]["token_str"]
+        best_word = predictions[0]["token"]
         current_text = current_text.replace("[MASK]", best_word, 1)
 
     return results_all
@@ -56,18 +102,25 @@ def home():
 
 @app.route("/predict", methods=["POST"])
 def predict():
-    data = request.json
-    raw_text = data["text"]
+    try:
+        data = request.json
+        raw_text = data["text"]
 
-    normalized_text = normalize_blanks(raw_text)
-    result = predict_all_masks(normalized_text)
+        normalized_text = normalize_blanks(raw_text)
+        result = predict_all_masks(normalized_text)
 
-    return jsonify({
-        "status": "success",
-        "normalized_text": normalized_text,
-        "mask_count": normalized_text.count("[MASK]"),
-        "results": result
-    })
+        return jsonify({
+            "status": "success",
+            "normalized_text": normalized_text,
+            "mask_count": normalized_text.count("[MASK]"),
+            "results": result
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
 
 @app.route("/feedback", methods=["POST"])
@@ -93,6 +146,5 @@ def feedback():
 
 
 if __name__ == "__main__":
-    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)
