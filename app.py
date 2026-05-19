@@ -34,36 +34,50 @@ def call_huggingface_fill_mask(text):
         }
     }
 
-    response = requests.post(
-        HF_API_URL,
-        headers=HEADERS,
-        json=payload,
-        timeout=60
-    )
+    try:
+        response = requests.post(
+            HF_API_URL,
+            headers=HEADERS,
+            json=payload,
+            timeout=90
+        )
+    except requests.exceptions.Timeout:
+        raise Exception("Hugging Face API timeout. Please try again.")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Hugging Face request failed: {str(e)}")
 
     raw = response.text
 
     try:
         data = response.json()
     except Exception:
-        raise Exception(f"HF response is not JSON. Status={response.status_code}, Body={raw[:300]}")
+        raise Exception(
+            f"HF response is not JSON. Status={response.status_code}, Body={raw[:300]}"
+        )
 
     if isinstance(data, dict) and "estimated_time" in data:
         time.sleep(float(data["estimated_time"]) + 1)
 
-        response = requests.post(
-            HF_API_URL,
-            headers=HEADERS,
-            json=payload,
-            timeout=60
-        )
+        try:
+            response = requests.post(
+                HF_API_URL,
+                headers=HEADERS,
+                json=payload,
+                timeout=90
+            )
+        except requests.exceptions.Timeout:
+            raise Exception("Hugging Face API timeout after model loading.")
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"Hugging Face retry failed: {str(e)}")
 
         raw = response.text
 
         try:
             data = response.json()
         except Exception:
-            raise Exception(f"HF retry response is not JSON. Status={response.status_code}, Body={raw[:300]}")
+            raise Exception(
+                f"HF retry response is not JSON. Status={response.status_code}, Body={raw[:300]}"
+            )
 
     if isinstance(data, dict) and "error" in data:
         raise Exception(data["error"])
